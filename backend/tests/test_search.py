@@ -77,3 +77,7 @@ def test_tokenize():
     assert tokenize("How many DAYS of leave?") == ["day", "leav"]
     assert tokenize("approves") == tokenize("approval") == tokenize("approved")
     assert tokenize("Liège") == ["lièg"]
+
+
+def test_numbers_do_not_count_against_coverage(index):
+    assert best(index, "Can I take a taxi at 11pm?") == ("expenses.md › Travel", True)

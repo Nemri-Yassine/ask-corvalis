@@ -1,11 +1,19 @@
 """Ask Corvalis — API server."""
 from contextlib import asynccontextmanager
+from typing import Literal
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 
 from app import db, llm
 from app.ingest import get_chunks, ingest_if_empty
 from app.search import Index, chunk_text
+
+MAX_QUESTION_LENGTH = 500
+TOP_K = 3
+RULES_NOT_FOUND = (
+    "I couldn't find this in the Corvalis policies. Please ask HR (hr@corvalis.be)."
+)
 
 # Filled at startup.
 state: dict = {}
@@ -24,6 +32,90 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Ask Corvalis", lifespan=lifespan)
 
 
+# --- Request / response shapes ----------------------------------------------
+
+class AskRequest(BaseModel):
+    question: str
+    scope: Literal["rules", "projects"] = "rules"
+
+
+class RatingRequest(BaseModel):
+    rating: Literal[-1, 0, 1]
+
+
+# --- Endpoints --------------------------------------------------------------
+
 @app.get("/api/health")
 def health():
     return {"status": "ok", "ollama": llm.is_available()}
+
+
+@app.post("/api/ask")
+def ask(req: AskRequest):
+    question = req.question.strip()
+    if not question:
+        raise HTTPException(422, "Please type a question.")
+    if len(question) > MAX_QUESTION_LENGTH:
+        raise HTTPException(
+            422, f"Your question is too long. Please keep it under {MAX_QUESTION_LENGTH} characters."
+        )
+    if req.scope == "projects":
+        raise HTTPException(422, "Searching past projects is not available yet.")
+
+    result = answer_rules(question)
+    result["question_id"] = log_question(question, req.scope, result)
+    return result
+
+
+@app.post("/api/questions/{question_id}/rating")
+def rate(question_id: int, req: RatingRequest):
+    conn = state["conn"]
+    cursor = conn.execute(
+        "UPDATE questions SET rating = ? WHERE id = ?", (req.rating, question_id)
+    )
+    conn.commit()
+    if cursor.rowcount == 0:
+        raise HTTPException(404, "Question not found.")
+    return {"ok": True}
+
+
+# --- Answer pipeline ---------------------------------------------------------
+
+def answer_rules(question: str) -> dict:
+    """Search the policies, then let the AI write the answer if it is available.
+
+    1. BM25 finds the top sections.
+    2. Nothing relevant -> fixed "ask HR" message (never invent).
+    3. AI available -> short answer written only from those sections.
+    4. AI offline (or it fails) -> show the best section as-is.
+    """
+    index = state["rules_index"]
+    results = index.search(question, k=TOP_K)
+
+    if not index.is_relevant(question, results):
+        return {"answer": RULES_NOT_FOUND, "sources": [], "mode": "search", "found": False}
+
+    chunks = [chunk for chunk, score in results if score > 0]
+    sources = [
+        {"doc": c["doc"], "section": c["section"], "snippet": c["text"]} for c in chunks
+    ]
+
+    if llm.is_available():
+        text = llm.answer(question, chunks)
+        if text == llm.NOT_FOUND:
+            return {"answer": RULES_NOT_FOUND, "sources": [], "mode": "ai", "found": False}
+        if text:
+            return {"answer": text, "sources": sources, "mode": "ai", "found": True}
+
+    # Fallback mode: the best-matching section, word for word.
+    return {"answer": chunks[0]["text"], "sources": sources, "mode": "search", "found": True}
+
+
+def log_question(question: str, scope: str, result: dict) -> int:
+    conn = state["conn"]
+    cursor = conn.execute(
+        "INSERT INTO questions (text, scope, answer, found, mode) VALUES (?, ?, ?, ?, ?)",
+        (question, scope, result["answer"], int(result["found"]), result["mode"]),
+    )
+    conn.commit()
+    return cursor.lastrowid

@@ -79,6 +79,10 @@ class Index:
         query_tokens = set(tokenize(query))
         if not results or not query_tokens or results[0][1] < MIN_SCORE:
             return False
+        # Numbers ("€3,000", "11pm") are the asker's own details, not policy
+        # keywords, so they don't count against coverage.
+        words = {t for t in query_tokens if not any(ch.isdigit() for ch in t)}
+        query_tokens = words or query_tokens
         best_tokens = set(self.tokens[self.items.index(results[0][0])])
         coverage = len(query_tokens & best_tokens) / len(query_tokens)
         return coverage >= MIN_COVERAGE
