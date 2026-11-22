@@ -38,7 +38,7 @@ export class FriendlyError extends Error {}
 
 async function post<T>(url: string, body: unknown): Promise<T> {
   const unreachable = new FriendlyError(
-    "Can't reach the Ask Corvalis server. Please try again in a moment.",
+    "Ask Corvalis isn't responding right now. Please try again in a moment.",
   )
   let response: Response
   try {
@@ -77,11 +77,11 @@ export async function getStats(): Promise<Stats> {
   try {
     response = await fetch('/api/stats')
   } catch {
-    throw new FriendlyError("Can't reach the Ask Corvalis server. Please try again in a moment.")
+    throw new FriendlyError("Ask Corvalis isn't responding right now. Please try again in a moment.")
   }
   const data = await response.json().catch(() => null)
   if (!response.ok || data === null) {
-    throw new FriendlyError("Can't load the statistics right now. Please try again in a moment.")
+    throw new FriendlyError("The figures can't be loaded right now. Please try again in a moment.")
   }
   return data as Stats
 }

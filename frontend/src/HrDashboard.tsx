@@ -27,10 +27,11 @@ export default function HrDashboard() {
   if (error) {
     return (
       <main className="hr">
-        <div className="answer error" role="alert">
-          {error}
+        <div className="card error" role="alert">
+          <p>{error}</p>
           <button
             type="button"
+            className="btn-secondary"
             onClick={() => {
               setError('')
               load()
@@ -42,40 +43,46 @@ export default function HrDashboard() {
       </main>
     )
   }
-  if (!stats) return <main className="hr">Loading…</main>
+  if (!stats)
+    return (
+      <main className="hr">
+        <p className="muted">Loading the figures<span className="dots" /></p>
+      </main>
+    )
 
   return (
     <main className="hr">
-      <h1>What staff are asking</h1>
+      <h1>HR dashboard</h1>
       <p className="hr-intro">
         Questions about company rules. Unanswered questions and 👎 answers show which policy is
         missing or unclear.
       </p>
 
-      <div className="cards">
-        <div className="card">
-          <span className="card-number">{stats.total}</span>
-          <span className="card-label">questions asked</span>
+      <div className="stats">
+        <div className="stat">
+          <span className="stat-number">{stats.total}</span>
+          <span className="stat-label">questions asked</span>
         </div>
-        <div className="card">
-          <span className="card-number">{stats.answered_pct}%</span>
-          <span className="card-label">answered from the policies</span>
+        <div className="stat">
+          <span className="stat-number">{stats.answered_pct}%</span>
+          <span className="stat-label">answered from the policies</span>
         </div>
-        <div className="card">
-          <span className="card-number">{stats.unanswered_count}</span>
-          <span className="card-label">not answered</span>
+        <div className="stat">
+          <span className="stat-number">{stats.unanswered_count}</span>
+          <span className="stat-label">not answered</span>
         </div>
-        <div className="card">
-          <span className="card-number">{stats.thumbs_down.length}</span>
-          <span className="card-label">answers rated 👎</span>
+        <div className="stat">
+          <span className="stat-number">{stats.thumbs_down.length}</span>
+          <span className="stat-label">answers rated 👎</span>
         </div>
       </div>
 
       <section className="hr-section">
         <h2>Most asked questions</h2>
         {stats.top_questions.length === 0 ? (
-          <p className="none">No questions yet.</p>
+          <p className="empty-note">No questions yet.</p>
         ) : (
+          <div className="table-card">
           <table>
             <thead>
               <tr>
@@ -89,19 +96,21 @@ export default function HrDashboard() {
                 <tr key={q.text}>
                   <td>{q.text}</td>
                   <td className="num">{q.count}</td>
-                  <td>{q.found ? 'Yes' : <span className="tag-no">No</span>}</td>
+                  <td>{q.found ? <span className="pill pill-ok">Yes</span> : <span className="pill pill-warn">No</span>}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </section>
 
       <section className="hr-section">
         <h2>Not answered — missing from the policies?</h2>
         {stats.unanswered.length === 0 ? (
-          <p className="none">Every question found an answer.</p>
+          <p className="empty-note">Every question found an answer.</p>
         ) : (
+          <div className="table-card">
           <table>
             <thead>
               <tr>
@@ -120,14 +129,16 @@ export default function HrDashboard() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </section>
 
       <section className="hr-section">
         <h2>Rated 👎 — unclear policy or wrong answer?</h2>
         {stats.thumbs_down.length === 0 ? (
-          <p className="none">No negative ratings.</p>
+          <p className="empty-note">No negative ratings.</p>
         ) : (
+          <div className="table-card">
           <table>
             <thead>
               <tr>
@@ -146,6 +157,7 @@ export default function HrDashboard() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </section>
     </main>
