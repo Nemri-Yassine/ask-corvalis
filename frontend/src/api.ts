@@ -42,6 +42,29 @@ async function post<T>(url: string, body: unknown): Promise<T> {
   return data as T
 }
 
+export type Stats = {
+  total: number
+  answered_pct: number
+  unanswered_count: number
+  top_questions: { text: string; count: number; found: number }[]
+  unanswered: { text: string; count: number; last_asked: string }[]
+  thumbs_down: { id: number; text: string; answer: string; created_at: string }[]
+}
+
+export async function getStats(): Promise<Stats> {
+  let response: Response
+  try {
+    response = await fetch('/api/stats')
+  } catch {
+    throw new FriendlyError("Can't reach the Ask Corvalis server. Please try again in a moment.")
+  }
+  const data = await response.json().catch(() => null)
+  if (!response.ok || data === null) {
+    throw new FriendlyError("Can't load the statistics right now. Please try again in a moment.")
+  }
+  return data as Stats
+}
+
 export function ask(question: string, scope: Scope): Promise<AskResponse> {
   return post('/api/ask', { question, scope })
 }

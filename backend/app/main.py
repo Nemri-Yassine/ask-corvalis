@@ -80,6 +80,46 @@ def rate(question_id: int, req: RatingRequest):
     return {"ok": True}
 
 
+@app.get("/api/stats")
+def stats():
+    """What HR needs to see: what people ask, and where the policies fall short.
+
+    Only 'rules' questions count: project questions are not HR's concern.
+    """
+    conn = state["conn"]
+
+    def rows(sql: str) -> list[dict]:
+        return [dict(r) for r in conn.execute(sql).fetchall()]
+
+    totals = conn.execute(
+        "SELECT COUNT(*) AS total, COALESCE(SUM(found), 0) AS answered "
+        "FROM questions WHERE scope = 'rules'"
+    ).fetchone()
+    total, answered = totals["total"], totals["answered"]
+
+    return {
+        "total": total,
+        "answered_pct": round(100 * answered / total) if total else 0,
+        "unanswered_count": total - answered,
+        "top_questions": rows(
+            # Same question typed differently (case, spaces) counts as one.
+            "SELECT MIN(text) AS text, COUNT(*) AS count, MAX(found) AS found "
+            "FROM questions WHERE scope = 'rules' "
+            "GROUP BY LOWER(TRIM(text)) ORDER BY count DESC, MAX(id) DESC LIMIT 10"
+        ),
+        "unanswered": rows(
+            # Grouped, so a gap that many people hit stands out.
+            "SELECT MIN(text) AS text, COUNT(*) AS count, MAX(created_at) AS last_asked "
+            "FROM questions WHERE scope = 'rules' AND found = 0 "
+            "GROUP BY LOWER(TRIM(text)) ORDER BY count DESC, MAX(id) DESC LIMIT 50"
+        ),
+        "thumbs_down": rows(
+            "SELECT id, text, answer, created_at FROM questions "
+            "WHERE scope = 'rules' AND rating = -1 ORDER BY id DESC LIMIT 50"
+        ),
+    }
+
+
 # --- Answer pipeline ---------------------------------------------------------
 
 def answer_rules(question: str) -> dict:

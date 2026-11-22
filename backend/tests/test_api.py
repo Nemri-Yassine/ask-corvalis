@@ -99,3 +99,22 @@ def test_rating_errors(client):
 def test_weak_sources_are_dropped(client, ai_off):
     body = ask(client, "I lost my laptop, what do I do?").json()
     assert [s["section"] for s in body["sources"]] == ["Lost or stolen devices"]
+
+
+def test_stats(client, ai_off):
+    assert client.get("/api/stats").json()["total"] == 0  # empty DB is fine
+
+    ask(client, "Can I work from home?")
+    ask(client, "can i work from home? ")   # same question, typed differently
+    ask(client, "pizza recipe")
+    ask(client, "Pizza recipe")
+    qid = ask(client, "What's the mileage rate?").json()["question_id"]
+    client.post(f"/api/questions/{qid}/rating", json={"rating": -1})
+
+    s = client.get("/api/stats").json()
+    assert s["total"] == 5
+    assert s["answered_pct"] == 60
+    assert s["unanswered_count"] == 2
+    assert s["top_questions"][0]["count"] == 2
+    assert [(q["text"].lower(), q["count"]) for q in s["unanswered"]] == [("pizza recipe", 2)]
+    assert [q["text"] for q in s["thumbs_down"]] == ["What's the mileage rate?"]
