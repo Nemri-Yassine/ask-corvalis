@@ -1,0 +1,5 @@
+fastapi
+uvicorn[standard]
+rank_bm25
+httpx
+pytest
