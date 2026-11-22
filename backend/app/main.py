@@ -11,6 +11,7 @@ from app.search import Index, chunk_text
 
 MAX_QUESTION_LENGTH = 500
 TOP_K = 3
+SOURCE_RATIO = 0.5  # a source is shown if it scores at least half the best one
 RULES_NOT_FOUND = (
     "I couldn't find this in the Corvalis policies. Please ask HR (hr@corvalis.be)."
 )
@@ -95,7 +96,10 @@ def answer_rules(question: str) -> dict:
     if not index.is_relevant(question, results):
         return {"answer": RULES_NOT_FOUND, "sources": [], "mode": "search", "found": False}
 
-    chunks = [chunk for chunk, score in results if score > 0]
+    # Keep only sections nearly as relevant as the best one: weaker hits
+    # (e.g. 'Approved suppliers' for a lost laptop) only add noise.
+    best_score = results[0][1]
+    chunks = [chunk for chunk, score in results if score >= best_score * SOURCE_RATIO]
     sources = [
         {"doc": c["doc"], "section": c["section"], "snippet": c["text"]} for c in chunks
     ]

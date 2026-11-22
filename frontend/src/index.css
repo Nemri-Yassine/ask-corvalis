@@ -1,11 +1,44 @@
 :root {
+  --navy: #1d3557;
+  --teal: #2a7f7a;
+  --teal-light: #e3f1ef;
+  --text: #1f2933;
+  --muted: #5f6b7a;
+  --border: #dde2e8;
+  --bg: #f5f7f9;
+  --card: #ffffff;
+  --warn-bg: #fff6e5;
+  --error-bg: #fdecec;
+
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   font-size: 18px;
   line-height: 1.5;
-  color: #1f2933;
-  background: #f7f8fa;
+  color: var(--text);
+  background: var(--bg);
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
   margin: 0;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+:focus-visible {
+  outline: 3px solid var(--teal);
+  outline-offset: 2px;
 }

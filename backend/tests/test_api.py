@@ -94,3 +94,8 @@ def test_questions_are_logged_and_rated(client, ai_off):
 def test_rating_errors(client):
     assert client.post("/api/questions/999/rating", json={"rating": 1}).status_code == 404
     assert client.post("/api/questions/1/rating", json={"rating": 5}).status_code == 422
+
+
+def test_weak_sources_are_dropped(client, ai_off):
+    body = ask(client, "I lost my laptop, what do I do?").json()
+    assert [s["section"] for s in body["sources"]] == ["Lost or stolen devices"]
