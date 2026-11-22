@@ -2,6 +2,7 @@ import { useState } from 'react'
 import Chat from './Chat'
 import ErrorBoundary from './ErrorBoundary'
 import HrDashboard from './HrDashboard'
+import StatusPill from './StatusPill'
 import type { Scope } from './api'
 import './App.css'
 
@@ -40,6 +41,7 @@ export default function App() {
           )}
 
           <nav className="header-actions">
+            <StatusPill />
             {isHrPage ? (
               <a className="header-link" href="/">
                 ← Back to questions

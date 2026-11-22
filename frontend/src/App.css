@@ -827,3 +827,142 @@
     width: auto;
   }
 }
+
+/* =========================================================
+   Local AI: status pill, progress steps, stop
+   ========================================================= */
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  padding: 3px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.status-pill.on {
+  background: #e8f6ee;
+  color: #166534;
+}
+
+.status-pill.off {
+  background: var(--bg);
+  color: var(--muted);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.status-pill.on .status-dot {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.18);
+}
+
+.status-pill.off .status-dot {
+  background: var(--faint);
+}
+
+.card.progress {
+  color: var(--muted);
+}
+
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  font-size: 0.92rem;
+}
+
+.steps li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  transition: color var(--fast);
+}
+
+.steps li.active {
+  color: var(--text);
+}
+
+.steps li.done {
+  color: var(--faint);
+}
+
+.step-check {
+  color: var(--ok);
+}
+
+.elapsed {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.82rem;
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.streaming {
+  margin-top: var(--s3) !important;
+  padding-top: var(--s3);
+  border-top: 1px solid var(--line);
+  color: var(--text);
+}
+
+/* blinking caret after the text while the AI writes */
+.streaming::after {
+  content: '▍';
+  margin-left: 1px;
+  color: var(--primary);
+  animation: caret 1s steps(2) infinite;
+}
+
+@keyframes caret {
+  50% {
+    opacity: 0;
+  }
+}
+
+.card.stopped {
+  background: var(--bg);
+  box-shadow: none;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s3);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.send.stop {
+  background: var(--text);
+}
+
+.send.stop:hover {
+  background: #000;
+}
+
+@media (max-width: 600px) {
+  /* keep only the dot + model name on phones */
+  .status-pill.on .status-label {
+    font-size: 0;
+  }
+
+  .status-pill.on .status-label::after {
+    content: 'Local AI';
+    font-size: 0.8rem;
+  }
+
+  .elapsed {
+    margin-left: 0;
+  }
+}

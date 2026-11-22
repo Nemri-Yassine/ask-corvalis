@@ -48,6 +48,17 @@ function SourceChips({ sources }: { sources: Source[] }) {
   )
 }
 
+// Says who produced the answer: the local AI (which model, how long) or plain search.
+function badgeText(result: AskResponse) {
+  const seconds = `${(result.latency_ms / 1000).toFixed(1)}s`
+  if (result.mode === 'ai') {
+    return `⚡ Local AI · ${result.model} · ${seconds} · nothing leaves this computer`
+  }
+  if (!result.ai_available) return '🔎 Search result, local AI is offline'
+  if (!result.found) return `🔎 Searched the documents · ${seconds}`
+  return `🔎 Search result · ${seconds}` // the AI was up but didn't give a usable answer
+}
+
 export default function Answer({ result }: { result: AskResponse }) {
   const [rating, setRating] = useState<-1 | 0 | 1>(0)
   const [copied, setCopied] = useState(false)
@@ -87,9 +98,7 @@ export default function Answer({ result }: { result: AskResponse }) {
         {result.sources.length > 0 && !hasProjects && <SourceChips sources={result.sources} />}
 
         <div className="answer-footer">
-          <span className={`badge ${result.mode}`}>
-            {result.mode === 'ai' ? 'AI answer' : 'Search result'}
-          </span>
+          <span className={`badge ${result.mode}`}>{badgeText(result)}</span>
           <div className="answer-actions">
             <button
               type="button"

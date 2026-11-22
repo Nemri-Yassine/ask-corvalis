@@ -3,6 +3,7 @@
 The app must work without it: every function here fails safely and the
 caller falls back to showing the search result.
 """
+import json
 import os
 import re
 import time
@@ -89,31 +90,77 @@ def format_sources(chunks: list[dict]) -> str:
     return "\n\n".join(f"[{c['doc']} › {c['section']}]\n{c['text']}" for c in chunks)
 
 
-def answer(question: str, chunks: list[dict], system_prompt: str = RULES_PROMPT) -> str | None:
-    """Ask the model to answer from the given chunks.
+class AIUnavailable(Exception):
+    """Ollama is down, too slow, or sent something we can't read."""
 
-    Returns the answer text, NOT_FOUND, or None if anything went wrong
-    (Ollama down, too slow, bad reply) — the caller then falls back to search.
-    """
-    payload = {
+
+def _mark_offline():
+    # Treat Ollama as offline for the next 30s so we don't wait for it again.
+    _last_check["time"] = time.time()
+    _last_check["available"] = False
+
+
+def _payload(question: str, chunks: list[dict], system_prompt: str, stream: bool) -> dict:
+    return {
         "model": OLLAMA_MODEL,
-        "stream": False,
+        "stream": stream,
         "options": {"temperature": 0},  # same question -> same answer
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"Sources:\n\n{format_sources(chunks)}\n\nQuestion: {question}"},
         ],
     }
+
+
+def answer(question: str, chunks: list[dict], system_prompt: str = RULES_PROMPT) -> str | None:
+    """Ask the model to answer from the given chunks, in one go.
+
+    Returns the answer text, NOT_FOUND, or None if anything went wrong
+    (Ollama down, too slow, bad reply) — the caller then falls back to search.
+    """
+    payload = _payload(question, chunks, system_prompt, stream=False)
     try:
         response = httpx.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=TIMEOUT_SECONDS)
         response.raise_for_status()
-        text = response.json()["message"]["content"].strip()
+        text = response.json()["message"]["content"]
     except (httpx.HTTPError, KeyError, ValueError):
-        # Treat Ollama as offline for the next 30s so we don't wait again.
-        _last_check["time"] = time.time()
-        _last_check["available"] = False
+        _mark_offline()
         return None
+    return clean_reply(text, chunks)
 
+
+def stream_answer(question: str, chunks: list[dict], system_prompt: str = RULES_PROMPT):
+    """Same as answer(), but yields the reply piece by piece as the model writes it.
+
+    Raises AIUnavailable if Ollama fails or takes more than TIMEOUT_SECONDS in total.
+    The caller joins the pieces and runs clean_reply() on the full text.
+    """
+    payload = _payload(question, chunks, system_prompt, stream=True)
+    deadline = time.time() + TIMEOUT_SECONDS
+    try:
+        with httpx.stream("POST", f"{OLLAMA_URL}/api/chat", json=payload, timeout=TIMEOUT_SECONDS) as response:
+            response.raise_for_status()
+            for line in response.iter_lines():  # Ollama sends one JSON object per line
+                if not line:
+                    continue
+                data = json.loads(line)
+                piece = data.get("message", {}).get("content", "")
+                if piece:
+                    yield piece
+                if data.get("done"):
+                    return
+                if time.time() > deadline:
+                    raise AIUnavailable("took too long")
+    except (httpx.HTTPError, ValueError) as error:
+        _mark_offline()
+        raise AIUnavailable(str(error)) from error
+    except AIUnavailable:
+        _mark_offline()
+        raise
+
+
+def clean_reply(text: str, chunks: list[dict]) -> str | None:
+    """The checks every model reply goes through before anyone sees it."""
     # Small models sometimes write a sentence AND the marker: the marker wins
     # only if nothing else useful is left.
     text = text.replace(NOT_FOUND, "").strip()

@@ -1,10 +1,12 @@
 """Ask Corvalis — API server."""
+import json
 import logging
+import time
 from contextlib import asynccontextmanager
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from app import db, llm
@@ -71,11 +73,10 @@ class RatingRequest(BaseModel):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "ollama": llm.is_available()}
+    return {"status": "ok", "ollama": llm.is_available(), "model": llm.OLLAMA_MODEL}
 
 
-@app.post("/api/ask")
-def ask(req: AskRequest):
+def clean_question(req: AskRequest) -> str:
     question = req.question.strip()
     if not question:
         raise HTTPException(422, "Please type a question.")
@@ -83,11 +84,71 @@ def ask(req: AskRequest):
         raise HTTPException(
             422, f"Your question is too long. Please keep it under {MAX_QUESTION_LENGTH} characters."
         )
+    return question
+
+
+@app.post("/api/ask")
+def ask(req: AskRequest):
+    """The whole answer in one response."""
+    question = clean_question(req)
+    start = time.perf_counter()
     if req.scope == "projects":
         result = answer_projects(question, req.project_type, req.year_from, req.year_to)
     else:
-        result = {**answer_rules(question), "projects": []}
-    result["question_id"] = log_question(question, req.scope, result)
+        result = answer_rules(question)
+    return complete(result, question, req.scope, start)
+
+
+@app.post("/api/ask/stream")
+def ask_stream(req: AskRequest):
+    """Same answer, sent as Server-Sent Events while it is being written:
+
+    event: sources  -> what was found, and whether the local AI will write the answer
+    event: token    -> one piece of the AI's text (many of these)
+    event: done     -> the final, checked answer + metadata (same shape as /api/ask)
+    """
+    question = clean_question(req)  # validation errors are normal JSON 422s
+
+    def events():
+        try:
+            start = time.perf_counter()
+            r = retrieve(question, req)
+            use_ai = r["found"] and llm.is_available()
+            yield sse("sources", {
+                "sources": r["sources"], "projects": r["projects"], "found": r["found"],
+                "ai": use_ai, "model": llm.OLLAMA_MODEL,
+            })
+
+            ai_text = None
+            if use_ai:
+                pieces = []
+                try:
+                    for piece in llm.stream_answer(question, r["llm_sources"], r["prompt"]):
+                        pieces.append(piece)
+                        yield sse("token", {"text": piece})
+                    ai_text = llm.clean_reply("".join(pieces), r["llm_sources"])
+                except llm.AIUnavailable:
+                    ai_text = None  # finish() falls back to the search result
+
+            yield sse("done", complete(finish(r, ai_text), question, req.scope, start))
+        except Exception:
+            logger.exception("Unexpected error while streaming")
+            yield sse("error", {"detail": "Something went wrong, try again."})
+
+    return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+
+
+def sse(event: str, data: dict) -> str:
+    """One Server-Sent Event."""
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+def complete(result: dict, question: str, scope: str, start: float) -> dict:
+    """Log the question and add the metadata the UI shows under the answer."""
+    result["question_id"] = log_question(question, scope, result)
+    result["model"] = llm.OLLAMA_MODEL if result["mode"] == "ai" else None
+    result["ai_available"] = llm.is_available()
+    result["latency_ms"] = round((time.perf_counter() - start) * 1000)
     return result
 
 
@@ -154,43 +215,59 @@ def stats():
 
 # --- Answer pipeline ---------------------------------------------------------
 
+# Every answer goes through the same three steps:
+#   1. retrieve()  BM25 search + "relevant enough?" rule  (no AI)
+#   2. the local AI writes an answer from what was found  (if Ollama is up)
+#   3. finish()    checks the AI's text, or falls back to the search result
+# /api/ask runs them in one go; /api/ask/stream sends the AI's text as it comes.
+
 def answer_rules(question: str) -> dict:
-    """Search the policies, then let the AI write the answer if it is available.
-
-    1. BM25 finds the top sections.
-    2. Nothing relevant -> fixed "ask HR" message (never invent).
-    3. AI available -> short answer written only from those sections.
-    4. AI offline (or it fails) -> show the best section as-is.
-    """
-    index = state["rules_index"]
-    results = index.search(question, k=TOP_K)
-
-    if not index.is_relevant(question, results):
-        return {"answer": RULES_NOT_FOUND, "sources": [], "mode": "search", "found": False}
-
-    chunks = strong_results(results)
-    sources = [
-        {"doc": c["doc"], "section": c["section"], "snippet": c["text"]} for c in chunks
-    ]
-
-    if llm.is_available():
-        text = llm.answer(question, chunks)
-        if text == llm.NOT_FOUND:
-            return {"answer": RULES_NOT_FOUND, "sources": [], "mode": "ai", "found": False}
-        if text:
-            return {"answer": text, "sources": sources, "mode": "ai", "found": True}
-
-    # Fallback mode: the best-matching section, word for word.
-    return {"answer": chunks[0]["text"], "sources": sources, "mode": "search", "found": True}
+    return finish(*with_ai(question, retrieve_rules(question)))
 
 
 def answer_projects(
     question: str, project_type: str | None, year_from: int | None, year_to: int | None
 ) -> dict:
-    """Same pipeline as answer_rules, over past projects, with optional filters.
+    return finish(*with_ai(question, retrieve_projects(question, project_type, year_from, year_to)))
 
-    The result also lists the matching projects in full, so the UI can show cards.
-    """
+
+def with_ai(question: str, r: dict) -> tuple[dict, str | None]:
+    """Step 2, in one go (the streaming endpoint does this piece by piece)."""
+    if r["found"] and llm.is_available():
+        return r, llm.answer(question, r["llm_sources"], system_prompt=r["prompt"])
+    return r, None
+
+
+def retrieve(question: str, req: AskRequest) -> dict:
+    if req.scope == "projects":
+        return retrieve_projects(question, req.project_type, req.year_from, req.year_to)
+    return retrieve_rules(question)
+
+
+def retrieve_rules(question: str) -> dict:
+    """Step 1 for company rules: the policy sections that answer the question."""
+    index = state["rules_index"]
+    results = index.search(question, k=TOP_K)
+    r = {"found": False, "sources": [], "projects": [], "not_found": RULES_NOT_FOUND}
+    if not index.is_relevant(question, results):
+        return r
+
+    chunks = strong_results(results)
+    return {
+        **r,
+        "found": True,
+        "sources": [{"doc": c["doc"], "section": c["section"], "snippet": c["text"]} for c in chunks],
+        "llm_sources": chunks,
+        "prompt": llm.RULES_PROMPT,
+        # Without AI: the best-matching section, word for word.
+        "fallback": chunks[0]["text"],
+    }
+
+
+def retrieve_projects(
+    question: str, project_type: str | None, year_from: int | None, year_to: int | None
+) -> dict:
+    """Step 1 for past projects, with the optional filters."""
     index = state["projects_index"]
     results = [
         (p, score)
@@ -199,19 +276,19 @@ def answer_projects(
         and (not year_from or p["year"] >= year_from)
         and (not year_to or p["year"] <= year_to)
     ][:PROJECTS_TOP_K]
-
-    not_found = {
-        "answer": PROJECTS_NOT_FOUND, "sources": [], "projects": [], "mode": "search", "found": False
-    }
+    r = {"found": False, "sources": [], "projects": [], "not_found": PROJECTS_NOT_FOUND}
     if not index.is_relevant(question, results, MIN_COVERAGE_PROJECTS):
-        return not_found
+        return r
 
     projects = strong_results(results)
-    sources = [{"doc": p["number"], "section": p["title"], "snippet": p["summary"]} for p in projects]
-
-    if llm.is_available():
+    count = len(projects)
+    return {
+        **r,
+        "found": True,
+        "sources": [{"doc": p["number"], "section": p["title"], "snippet": p["summary"]} for p in projects],
+        "projects": projects,
         # Give the model each project as a "source" it can cite: [number › title].
-        as_sources = [
+        "llm_sources": [
             {
                 "doc": p["number"],
                 "section": p["title"],
@@ -219,19 +296,30 @@ def answer_projects(
                 f"{p['project_manager']}. Materials: {p['materials']}. {p['summary']}",
             }
             for p in projects
-        ]
-        text = llm.answer(question, as_sources, system_prompt=llm.PROJECTS_PROMPT)
-        if text == llm.NOT_FOUND:
-            return {**not_found, "mode": "ai"}
-        if text:
-            text = llm.format_project_answer(text, projects)
-        if text:
-            return {"answer": text, "sources": sources, "projects": projects, "mode": "ai", "found": True}
+        ],
+        "prompt": llm.PROJECTS_PROMPT,
+        # Without AI: the project cards speak for themselves.
+        "fallback": f"Found {count} past project{'s' if count > 1 else ''} "
+        f"that match{'es' if count == 1 else ''}:",
+    }
 
-    # Fallback mode: the project cards speak for themselves.
-    count = len(projects)
-    answer = f"Found {count} past project{'s' if count > 1 else ''} that match{'es' if count == 1 else ''}:"
-    return {"answer": answer, "sources": sources, "projects": projects, "mode": "search", "found": True}
+
+def finish(r: dict, ai_text: str | None) -> dict:
+    """Step 3: turn the search result + the AI's (checked) text into the answer."""
+    base = {"sources": r["sources"], "projects": r["projects"]}
+    not_found = {"answer": r["not_found"], "sources": [], "projects": [], "found": False}
+
+    if not r["found"]:
+        return {**not_found, "mode": "search"}
+    if ai_text == llm.NOT_FOUND:  # the AI read the sources and they don't answer it
+        return {**not_found, "mode": "ai"}
+    if ai_text and r["projects"]:
+        # Project numbers, years and PMs come from our data, not from the model.
+        ai_text = llm.format_project_answer(ai_text, r["projects"])
+    if ai_text:
+        return {**base, "answer": ai_text, "mode": "ai", "found": True}
+    # AI offline, failed, or gave nothing usable.
+    return {**base, "answer": r["fallback"], "mode": "search", "found": True}
 
 
 def strong_results(results: list[tuple[dict, float]]) -> list[dict]:

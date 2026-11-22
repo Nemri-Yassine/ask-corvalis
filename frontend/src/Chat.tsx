@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import Answer from './Answer'
 import Filters from './Filters'
-import { SendIcon } from './icons'
+import Progress, { type ProgressState } from './Progress'
+import { SendIcon, StopIcon } from './icons'
 import {
-  ask,
+  askStream,
   FriendlyError,
   getFilterChoices,
   type AskResponse,
@@ -12,12 +13,15 @@ import {
   type Scope,
 } from './api'
 
-// One exchange in the conversation: the question, then a result, an error, or "loading".
+// One exchange in the conversation: the question, then live progress, and
+// finally a result or an error.
 type Turn = {
   id: number
   question: string
+  progress?: ProgressState
   result?: AskResponse
   error?: string
+  stopped?: boolean
 }
 
 // Each mode is its own conversation, with its own intro and suggestions.
@@ -50,24 +54,6 @@ const MODES: Record<Scope, { intro: string; placeholder: string; suggestions: st
 const MAX_LENGTH = 500
 const NO_FILTERS: ProjectFilters = { projectType: '', yearFrom: '', yearTo: '' }
 
-// "Looking it up…", then a reassurance if the AI is slow (it can take up to 30 s).
-function Loading() {
-  const [slow, setSlow] = useState(false)
-  useEffect(() => {
-    const timer = setTimeout(() => setSlow(true), 8000)
-    return () => clearTimeout(timer)
-  }, [])
-  return (
-    <div className="msg assistant">
-      <span className="avatar" aria-hidden="true">C</span>
-      <div className="card loading" aria-live="polite">
-        {slow ? 'Still working, this one is taking a little longer' : 'Looking it up'}
-        <span className="dots" />
-      </div>
-    </div>
-  )
-}
-
 type Props = { scope: Scope; onBusyChange: (busy: boolean) => void }
 
 export default function Chat({ scope, onBusyChange }: Props) {
@@ -78,6 +64,7 @@ export default function Chat({ scope, onBusyChange }: Props) {
   const [choices, setChoices] = useState<FilterChoices | null>(null)
   const lastTurnRef = useRef<HTMLLIElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const abortRef = useRef<AbortController | null>(null) // lets the Stop button cancel
 
   const mode = MODES[scope]
   const current = turns[scope]
@@ -118,21 +105,47 @@ export default function Chat({ scope, onBusyChange }: Props) {
     if (!question || loading) return
 
     const id = retryId ?? Date.now()
+    const progress: ProgressState = { phase: 'searching', text: '', startedAt: Date.now() }
     if (retryId) {
-      updateTurn(id, { error: undefined, result: undefined })
+      updateTurn(id, { progress, error: undefined, result: undefined, stopped: false })
     } else {
-      setTurns((all) => ({ ...all, [scope]: [...all[scope], { id, question }] }))
+      setTurns((all) => ({ ...all, [scope]: [...all[scope], { id, question, progress }] }))
       setInput('')
     }
     setBusy(true)
+    const controller = new AbortController()
+    abortRef.current = controller
+
+    // Progress updates as the server streams: search done -> AI writing -> pieces of text.
+    let live = progress
+    const show = (change: Partial<ProgressState>) => {
+      live = { ...live, ...change }
+      updateTurn(id, { progress: live })
+    }
 
     try {
-      const result = await ask(question, scope, filters)
-      updateTurn(id, { result })
+      const result = await askStream(
+        question,
+        scope,
+        filters,
+        {
+          onSearch: (step) => {
+            if (step.ai) show({ phase: 'writing', model: step.model, startedAt: Date.now() })
+          },
+          onToken: (piece) => show({ text: live.text + piece }),
+        },
+        controller.signal,
+      )
+      updateTurn(id, { result, progress: undefined })
     } catch (e) {
-      const error = e instanceof FriendlyError ? e.message : 'Something went wrong. Please try again.'
-      updateTurn(id, { error })
+      if ((e as Error).name === 'AbortError') {
+        updateTurn(id, { stopped: true, progress: undefined })
+      } else {
+        const error = e instanceof FriendlyError ? e.message : 'Something went wrong. Please try again.'
+        updateTurn(id, { error, progress: undefined })
+      }
     } finally {
+      abortRef.current = null
       setBusy(false)
       inputRef.current?.focus()
     }
@@ -181,11 +194,13 @@ export default function Chat({ scope, onBusyChange }: Props) {
 
               {turn.result && <Answer result={turn.result} />}
 
-              {turn.error && (
+              {turn.progress && <Progress progress={turn.progress} scope={scope} />}
+
+              {(turn.error || turn.stopped) && (
                 <div className="msg assistant">
                   <span className="avatar" aria-hidden="true">C</span>
-                  <div className="card error" role="alert">
-                    <p>{turn.error}</p>
+                  <div className={`card ${turn.stopped ? 'stopped' : 'error'}`} role="alert">
+                    <p>{turn.stopped ? 'You stopped this answer.' : turn.error}</p>
                     <button type="button" className="btn-secondary" onClick={() => send(turn.question, turn.id)}>
                       Try again
                     </button>
@@ -193,7 +208,6 @@ export default function Chat({ scope, onBusyChange }: Props) {
                 </div>
               )}
 
-              {!turn.result && !turn.error && <Loading />}
             </li>
           ))}
         </ol>
@@ -212,9 +226,21 @@ export default function Chat({ scope, onBusyChange }: Props) {
             maxLength={MAX_LENGTH}
             autoFocus
           />
-          <button type="submit" className="send" aria-label="Send question" disabled={loading || !input.trim()}>
-            <SendIcon />
-          </button>
+          {loading ? (
+            <button
+              type="button"
+              className="send stop"
+              aria-label="Stop the answer"
+              title="Stop"
+              onClick={() => abortRef.current?.abort()}
+            >
+              <StopIcon />
+            </button>
+          ) : (
+            <button type="submit" className="send" aria-label="Send question" disabled={!input.trim()}>
+              <SendIcon />
+            </button>
+          )}
         </form>
         <p className="composer-hint">Enter to send · Shift+Enter for a new line</p>
       </div>
