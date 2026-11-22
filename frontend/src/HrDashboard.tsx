@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { getStats, type Stats } from './api'
 
 // SQLite stores UTC time as "2026-11-22 10:05:28"; show it in local time.
-function formatDate(utc: string) {
+function formatDate(utc: string | undefined) {
+  if (!utc) return ''
   return new Date(utc.replace(' ', 'T') + 'Z').toLocaleString(undefined, {
     day: 'numeric',
     month: 'short',

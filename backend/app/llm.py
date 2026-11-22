@@ -24,6 +24,44 @@ After each fact, cite its source exactly as written in the source header, e.g. [
 If the sources only partly answer the question, say what they do say.
 If the sources say nothing about the question, reply with only the word: {NOT_FOUND}"""
 
+PROJECTS_PROMPT = f"""You help Corvalis engineers find similar past projects.
+Use ONLY the projects listed below. Never invent projects or details.
+List only the projects that really match the question, most relevant first.
+Write one line per project, exactly in this format, and nothing else:
+2019-042: 60 m weathering-steel footbridge over the Sambre.
+After the project number and colon, say in under 15 words why the project matches.
+If none of the projects match, reply with only the word: {NOT_FOUND}"""
+
+# A line that starts with a project number, in any of the shapes small models write:
+#   "2019-042: reason"   "[2014-017] reason"   "[2016-023 › Title]"   "- 2014-017 (…): reason"
+PROJECT_LINE = re.compile(r"^\W*(\d{4}-\d{3})(?:[^\]:]*[\]:])?\s*(.*)$")
+
+
+def format_project_answer(text: str, projects: list[dict]) -> str | None:
+    """Turn the model's reply into '- NUMBER (year, PM): reason' lines.
+
+    Small models get names and years wrong, so those come from our data; the
+    model only decides which projects match and why. Projects we did not give
+    it are dropped. Returns None if nothing usable is left (caller falls back).
+    """
+    by_number = {p["number"]: p for p in projects}
+    entries: list[list[str]] = []  # [number, reason]
+    for line in text.splitlines():
+        match = PROJECT_LINE.match(line)
+        if match and match.group(1) in by_number:
+            entries.append([match.group(1), match.group(2).strip()])
+        elif entries and not entries[-1][1] and line.strip():
+            entries[-1][1] = line.strip()  # reason written on the next line
+
+    lines, seen = [], set()
+    for number, reason in entries:
+        if number in seen:
+            continue
+        seen.add(number)
+        p = by_number[number]
+        lines.append(f"- {number} ({p['year']}, {p['project_manager']}): {reason or p['title']}")
+    return "\n".join(lines) or None
+
 # Remember the result of the last ping for 30 seconds,
 # so we don't ping Ollama on every question.
 _CACHE_SECONDS = 30

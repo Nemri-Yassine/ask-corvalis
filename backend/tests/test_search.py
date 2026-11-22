@@ -76,7 +76,7 @@ def test_off_topic_not_found(index, question):
 def test_tokenize():
     assert tokenize("How many DAYS of leave?") == ["day", "leav"]
     assert tokenize("approves") == tokenize("approval") == tokenize("approved")
-    assert tokenize("Liège") == ["lièg"]
+    assert tokenize("Liège") == tokenize("Liege") == ["lieg"]
 
 
 def test_numbers_do_not_count_against_coverage(index):

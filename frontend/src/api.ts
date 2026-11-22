@@ -4,13 +4,34 @@ export type Scope = 'rules' | 'projects'
 
 export type Source = { doc: string; section: string; snippet: string }
 
+export type Project = {
+  number: string
+  title: string
+  type: string
+  discipline: string
+  client: string
+  city: string
+  year: number
+  project_manager: string
+  materials: string
+  budget_eur: number
+  summary: string
+  folder_path: string
+}
+
 export type AskResponse = {
   question_id: number
   answer: string
   sources: Source[]
+  projects: Project[] // only filled for past-project questions
   mode: 'ai' | 'search'
   found: boolean
 }
+
+// Optional filters for past projects ('' = no filter).
+export type ProjectFilters = { projectType: string; yearFrom: string; yearTo: string }
+
+export type FilterChoices = { types: string[]; min_year: number; max_year: number }
 
 // An error whose message can be shown to the user as-is.
 export class FriendlyError extends Error {}
@@ -65,8 +86,24 @@ export async function getStats(): Promise<Stats> {
   return data as Stats
 }
 
-export function ask(question: string, scope: Scope): Promise<AskResponse> {
-  return post('/api/ask', { question, scope })
+export function ask(question: string, scope: Scope, filters?: ProjectFilters): Promise<AskResponse> {
+  const body: Record<string, unknown> = { question, scope }
+  if (scope === 'projects' && filters) {
+    body.project_type = filters.projectType || null
+    body.year_from = filters.yearFrom ? Number(filters.yearFrom) : null
+    body.year_to = filters.yearTo ? Number(filters.yearTo) : null
+  }
+  return post('/api/ask', body)
+}
+
+export async function getFilterChoices(): Promise<FilterChoices | null> {
+  // Filters are optional: if this fails, the UI simply hides them.
+  try {
+    const response = await fetch('/api/projects/filters')
+    return response.ok ? await response.json() : null
+  } catch {
+    return null
+  }
 }
 
 export function rate(questionId: number, rating: -1 | 0 | 1): Promise<{ ok: boolean }> {
