@@ -1,4 +1,5 @@
 import Chat from './Chat'
+import ErrorBoundary from './ErrorBoundary'
 import HrDashboard from './HrDashboard'
 import './App.css'
 
@@ -24,7 +25,7 @@ export default function App() {
         </div>
       </header>
 
-      {isHrPage ? <HrDashboard /> : <Chat />}
+      <ErrorBoundary>{isHrPage ? <HrDashboard /> : <Chat />}</ErrorBoundary>
     </div>
   )
 }

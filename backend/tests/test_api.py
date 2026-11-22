@@ -118,3 +118,29 @@ def test_stats(client, ai_off):
     assert s["top_questions"][0]["count"] == 2
     assert [(q["text"].lower(), q["count"]) for q in s["unanswered"]] == [("pizza recipe", 2)]
     assert [q["text"] for q in s["thumbs_down"]] == ["What's the mileage rate?"]
+
+
+def test_unexpected_error_gives_friendly_json(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "test.db")
+
+    def broken(question):
+        raise RuntimeError("bug")
+
+    monkeypatch.setattr(main, "answer_rules", broken)
+    with TestClient(main.app, raise_server_exceptions=False) as c:
+        response = ask(c, "Can I work from home?")
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Something went wrong, try again."}
+
+
+def test_slow_ai_falls_back(client, monkeypatch):
+    import httpx
+
+    def too_slow(*args, **kwargs):
+        raise httpx.ReadTimeout("took longer than 30s")
+
+    monkeypatch.setattr(llm, "is_available", lambda: True)
+    monkeypatch.setattr(llm.httpx, "post", too_slow)
+    body = ask(client, "What's the mileage rate?").json()
+    assert body["mode"] == "search"
+    assert body["sources"][0]["section"] == "Mileage"

@@ -44,6 +44,21 @@ const TABS: Record<Scope, { intro: string; placeholder: string; examples: string
 }
 
 const MAX_LENGTH = 500
+
+// "Looking it up…", then a reassurance if the AI is slow (it can take up to 30 s).
+function Loading() {
+  const [slow, setSlow] = useState(false)
+  useEffect(() => {
+    const timer = setTimeout(() => setSlow(true), 8000)
+    return () => clearTimeout(timer)
+  }, [])
+  return (
+    <div className="answer loading" aria-live="polite">
+      {slow ? 'Still working, the AI is a bit slow right now' : 'Looking it up'}
+      <span className="dots" />
+    </div>
+  )
+}
 const NO_FILTERS: ProjectFilters = { projectType: '', yearFrom: '', yearTo: '' }
 
 export default function Chat() {
@@ -160,11 +175,7 @@ export default function Chat() {
                   </button>
                 </div>
               )}
-              {!turn.result && !turn.error && (
-                <div className="answer loading" aria-live="polite">
-                  Looking it up<span className="dots" />
-                </div>
-              )}
+              {!turn.result && !turn.error && <Loading />}
             </li>
           ))}
         </ol>

@@ -1,8 +1,10 @@
 """Ask Corvalis — API server."""
+import logging
 from contextlib import asynccontextmanager
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app import db, llm
@@ -22,6 +24,8 @@ PROJECTS_NOT_FOUND = (
     "a material or a city."
 )
 
+logger = logging.getLogger("ask-corvalis")
+
 # Filled at startup.
 state: dict = {}
 
@@ -39,6 +43,13 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Ask Corvalis", lifespan=lifespan)
+
+
+@app.exception_handler(Exception)
+async def unexpected_error(request: Request, exc: Exception):
+    """Any bug: log it, and give the UI a message it can show (instead of plain text)."""
+    logger.exception("Unexpected error on %s", request.url.path)
+    return JSONResponse(status_code=500, content={"detail": "Something went wrong, try again."})
 
 
 # --- Request / response shapes ----------------------------------------------
