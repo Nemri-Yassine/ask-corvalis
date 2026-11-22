@@ -1,0 +1,56 @@
+{
+  "on": {
+    "n": 95,
+    "overall": [
+      50,
+      95
+    ],
+    "retrieval": [
+      38,
+      77
+    ],
+    "answer": [
+      34,
+      77
+    ],
+    "refusal": [
+      14,
+      16
+    ],
+    "citation": [
+      30,
+      31
+    ],
+    "hallucinations": 1,
+    "ai_answers": 41,
+    "latency_avg": 436,
+    "latency_p95": 1185
+  },
+  "off": {
+    "n": 95,
+    "overall": [
+      53,
+      95
+    ],
+    "retrieval": [
+      38,
+      77
+    ],
+    "answer": [
+      37,
+      77
+    ],
+    "refusal": [
+      14,
+      16
+    ],
+    "citation": [
+      31,
+      31
+    ],
+    "hallucinations": 9,
+    "ai_answers": 0,
+    "latency_avg": 4,
+    "latency_p95": 5
+  }
+}

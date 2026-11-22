@@ -1,0 +1,29 @@
+{
+  "on": {
+    "n": 95,
+    "overall": [
+      73,
+      95
+    ],
+    "retrieval": [
+      57,
+      77
+    ],
+    "answer": [
+      56,
+      77
+    ],
+    "refusal": [
+      15,
+      16
+    ],
+    "citation": [
+      47,
+      48
+    ],
+    "hallucinations": 0,
+    "ai_answers": 62,
+    "latency_avg": 656,
+    "latency_p95": 1516
+  }
+}

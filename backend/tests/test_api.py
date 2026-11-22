@@ -144,3 +144,10 @@ def test_slow_ai_falls_back(client, monkeypatch):
     body = ask(client, "What's the mileage rate?").json()
     assert body["mode"] == "search"
     assert body["sources"][0]["section"] == "Mileage"
+
+
+def test_missing_citation_is_added(client, monkeypatch):
+    monkeypatch.setattr(llm, "is_available", lambda: True)
+    monkeypatch.setattr(llm, "answer", lambda q, chunks, **kw: "You get 20 days of paid holiday.")
+    body = ask(client, "How many days of annual leave do I get?").json()
+    assert body["answer"].startswith("You get 20 days of paid holiday. [leave.md › Annual leave]")

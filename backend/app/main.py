@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from app import db, llm
-from app.ingest import get_chunks, ingest_if_empty
+from app.ingest import get_chunks, reload_docs
 from app.search import MIN_COVERAGE_PROJECTS, Index, chunk_text, project_text
 from app.seed_projects import get_projects, seed_if_empty
 
@@ -35,8 +35,8 @@ state: dict = {}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     conn = db.connect()
-    ingest_if_empty(conn)  # these two only do work on the very first start
-    seed_if_empty(conn)
+    reload_docs(conn)  # policies: always re-read from docs/ (picks up edits)
+    seed_if_empty(conn)  # sample projects: only on the very first start
     state["conn"] = conn
     state["rules_index"] = Index(get_chunks(conn), chunk_text)
     state["projects_index"] = Index(get_projects(conn), project_text)
@@ -316,6 +316,9 @@ def finish(r: dict, ai_text: str | None) -> dict:
     if ai_text and r["projects"]:
         # Project numbers, years and PMs come from our data, not from the model.
         ai_text = llm.format_project_answer(ai_text, r["projects"])
+    elif ai_text and not llm.CITATION.search(ai_text):
+        # The small model sometimes forgets to cite: add the sources it was given.
+        ai_text += " " + " ".join(f"[{s['doc']} › {s['section']}]" for s in r["sources"])
     if ai_text:
         return {**base, "answer": ai_text, "mode": "ai", "found": True}
     # AI offline, failed, or gave nothing usable.

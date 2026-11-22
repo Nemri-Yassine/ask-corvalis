@@ -1,5 +1,5 @@
 from app import db
-from app.ingest import get_chunks, ingest_if_empty, load_all_docs
+from app.ingest import get_chunks, load_all_docs, reload_docs
 
 
 def test_every_doc_is_split_by_section():
@@ -17,17 +17,21 @@ def test_chunk_text_is_joined_into_one_paragraph():
     assert "\n" not in annual["text"]
 
 
-def test_ingest_is_idempotent(tmp_path):
+def test_reload_is_idempotent(tmp_path):
     conn = db.connect(tmp_path / "test.db")
-    assert ingest_if_empty(conn) == 21
-    assert ingest_if_empty(conn) == 0          # second run does nothing
+    assert reload_docs(conn) == 21
+    assert reload_docs(conn) == 21             # second run replaces, no duplicates
     assert len(get_chunks(conn)) == 21
-    conn.close()
+
+
+def test_document_title_is_kept():
+    approval = next(c for c in load_all_docs() if c["section"] == "Approval")
+    assert approval["title"] == "Expense policy"
 
 
 def test_data_survives_reconnect(tmp_path):
     path = tmp_path / "test.db"
     conn = db.connect(path)
-    ingest_if_empty(conn)
+    reload_docs(conn)
     conn.close()
     assert len(get_chunks(db.connect(path))) == 21

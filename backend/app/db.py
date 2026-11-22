@@ -10,6 +10,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS chunks (
     id      INTEGER PRIMARY KEY,
     doc     TEXT NOT NULL,      -- e.g. 'leave.md'
+    title   TEXT NOT NULL,      -- e.g. 'Leave and working time'
     section TEXT NOT NULL,      -- e.g. 'Annual leave'
     text    TEXT NOT NULL
 );
